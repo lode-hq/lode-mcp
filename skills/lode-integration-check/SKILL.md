@@ -1,6 +1,6 @@
 ---
 name: lode-integration-check
-description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify or n8n, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?").'
+description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel or Netlify, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?"), reads a project''s package.json, requirements or config files to report what Lode documents about its stack (plan needed, overlaps, function run-time limits), and writes an integration decision record (ADR) when the user picks an integration.'
 ---
 
 # Lode Integration Check
@@ -12,17 +12,21 @@ sold. Use it so the user gets facts, not guesses, before an integration is chose
 ## When to use
 
 - The user wants to connect one product to another on Xero, QuickBooks Online, HubSpot, Shopify,
-  Stripe, Supabase, Vercel, Netlify or n8n.
+  Stripe, Supabase, Vercel or Netlify.
 - The user wants to add a database (Postgres, Redis), auth, email, storage or another service to a
   Vercel, Netlify or Supabase project, including through the Vercel Marketplace or a Netlify extension.
 - You are about to recommend, compare or install an app or integration on one of those platforms
   (including `vercel integration add`, a Netlify extension, a Supabase partner integration, a Stripe
-  app, an n8n node, or a Xero, QuickBooks, HubSpot or Shopify app).
+  app, or a Xero, QuickBooks, HubSpot or Shopify app).
 - The user asks what syncs, which direction, what it costs, which plan it needs, or whether it works
   in their country.
 - The user already has two or more apps connected to one platform and asks whether they overlap,
   double-post, or could loop (for example "A2X and Synder are both on my Xero; do they clash?"). Use
   `overlap`.
+- The user is working in a project and asks what Lode knows about its stack, which plan its
+  integrations need, or how long its functions may run on Vercel, Netlify or Supabase. Use `stack`.
+- The user has just chosen an integration and wants it written down, or asks for a decision record or
+  ADR. Use `adr`.
 
 Not for: library or API documentation (use the vendor's docs), package security checks, or platforms
 Lode does not cover.
@@ -123,9 +127,65 @@ add `--share` if they say yes. It sends, per platform, the file's random project
 integration, its Lode id, kept, dropped or swapped, the reason code and how many days since it was
 chosen. Nothing else from the file or the project.
 
+## Decision records
+
+When the user has decided on an integration and is working in their project, offer to write a short
+decision record into it:
+
+```bash
+node scripts/lode.mjs adr <platform> --considered "<app>,<app>" --chose "<app>" --reason <code> [--status accepted]
+```
+
+It writes `docs/adr/NNN-<platform>-<app>.md` in the current folder (the next free number): the options,
+the choice, the reason, and Lode's facts for each option (what syncs, price, plan needed, regions,
+limitations), each line with its Lode page and last-verified date, plus a frontmatter block of fixed
+codes. It also saves the choice in `lode-integrations.json` (same project code), so `recheck` and `drop`
+keep the record's status current. Reason codes are the same as for `chose`. Status: proposed (default),
+accepted, shipped, kept, dropped, swapped.
+
+When it ships, or when the user hits a limit and builds around it, update it:
+
+```bash
+node scripts/lode.mjs adr --update docs/adr/001-xero-a2x.md --status shipped --constraint rate-limit --workaround batching-for-rate-limits
+```
+
+Constraints: plan-wall, rate-limit, missing-object, one-way-only, timeout, webhook-gap, region,
+currency, auth, price, other. Workarounds: custom-retry, custom-idempotency, polling-not-webhooks,
+extra-sync-tool, manual-step, plan-upgrade, custom-field-mapping, batching-for-rate-limits,
+background-job-for-timeouts, currency-handling, other. Use only these codes; anything else is refused
+and nothing is written. Put any detail in the file yourself, in the user's words; it never leaves the
+machine.
+
+Before adding `--share` to `adr`, ask the user whether Lode may keep, anonymously, the decision's codes,
+so vendors and Lode can see which integrations hold up and why. Only add `--share` on a yes. It sends the
+project code, platform, the Lode ids considered and chosen (an option Lode has no record of, such as an
+in-house tool, stays in the file; only how many there were is sent),
+the reason, status, constraint and workaround codes, and the days since the decision. No file content,
+paths, repository or company names.
+
+## Stack check
+
+In a project folder:
+
+```bash
+node scripts/lode.mjs stack [--framework nextjs]
+```
+
+It reads only `package.json`, `requirements.txt`, `pyproject.toml`, `Gemfile`, `go.mod`, the variable
+names in `.env.example` (never values, never `.env`), `vercel.json`, `netlify.toml` and
+`supabase/config.toml`, and matches official SDK package names and variable prefixes to apps and
+platforms. For each platform Lode covers in the stack it lists Lode's records for the other apps, the
+platform plan each needs, objects more than one app writes, and the platform's published function
+run-time limits by plan, each quoted with its link and read date. Report these as facts with their
+links; never tell the user their code is wrong or will time out, and never call an app with no Lode
+record unsupported.
+
+Before adding `--share`, ask the user whether Lode may keep, anonymously, the app and platform codes it
+found and the framework. Only add `--share` on a yes.
+
 If the Lode MCP server is connected (`https://trylode.io/mcp`), its tools do the same:
 `find_integrations`, `get_integration`, `compare_integrations`, `report_choice`, `request_coverage`,
-`check_stack_overlap` (its `share` is the same as `--share`).
+`check_stack_overlap` and `check_stack` (their `share` is the same as `--share`).
 
 ## Rules for the answer
 
@@ -152,5 +212,9 @@ which records were read); with `--share`, and only then, it also sends the platf
 the region. `chose` also reads the chosen app's public record and saves it in `lode-integrations.json`,
 which stays on the user's machine; `recheck` reads the public record of each integration in that file.
 Only with `--share` do `recheck` and `drop` send the project code, Lode ids, states, reason codes and
-days since chosen. Nothing else from the user's project, prompt or machine is sent, and no free text. Privacy:
+days since chosen. `adr` and `stack` work locally and read only Lode's public files; only with
+`--share` does `adr` send the project code, platform, Lode ids and a count of other options, and the fixed
+reason, status, constraint and workaround codes with the days since the decision, and `stack` the app
+and platform codes it found and the framework. Nothing else from the user's project, prompt or machine
+is sent, and no free text. Privacy:
 https://trylode.io/privacy/
