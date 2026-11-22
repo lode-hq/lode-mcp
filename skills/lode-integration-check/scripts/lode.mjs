@@ -16,6 +16,10 @@
 //   node lode.mjs recheck [--share]           what changed in Lode since each integration in lode-integrations.json was chosen
 //   node lode.mjs drop <app> <platform> [--reason <code>] [--switched-to <app>] [--share]
 //                                             mark an integration in lode-integrations.json as dropped (or swapped)
+//   node lode.mjs adr <platform> --considered "A,B" --chose B [--reason <code>] [--status <s>] [--constraint a,b] [--workaround a,b] [--share]
+//   node lode.mjs adr --update <file> [--status <s>] [--constraint a,b] [--workaround a,b] [--share]
+//                                             write or update a decision record in docs/adr/ in the current folder
+//   node lode.mjs stack [--framework f] [--share]   what Lode documents about the apps and platforms this project's manifests name
 //
 // What Lode receives: the app, platform and options in each request (for find and request: the needs,
 // region, stack names and fixed codes you pass). chose and outcome send nothing unless --share is
@@ -27,15 +31,21 @@
 // stays on your machine. recheck reads the public record of each integration in it. Only with --share
 // do recheck and drop send, per platform, the file's random project code and, for each integration,
 // its Lode id, kept, dropped or swapped, the fixed reason code and how many days since it was chosen.
+// adr writes docs/adr/NNN-<platform>-<app>.md from Lode's public records and saves nothing else; only with
+// --share does it send the project code, platform, the Lode ids considered and chosen (only a count of other options),
+// the fixed reason, status, constraint and workaround codes, and the days since the decision. stack reads
+// only package.json, requirements.txt, pyproject.toml, Gemfile, go.mod, the variable NAMES in .env.example
+// (never values), vercel.json, netlify.toml and supabase/config.toml, then Lode's public files; only with
+// --share does it send the app and platform codes it found and the framework.
 // Nothing else from your project, prompt or machine is sent; no free text. https://trylode.io/privacy/
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const BASE = (process.env.LODE_BASE || 'https://trylode.io').replace(/\/$/, '');
 const UA = process.env.LODE_UA || 'lode-skill/0.1 (+https://trylode.io/agents/)';
 
-export const NAMES = { xero: 'Xero', 'quickbooks-online': 'QuickBooks Online', hubspot: 'HubSpot', shopify: 'Shopify', stripe: 'Stripe', supabase: 'Supabase', vercel: 'Vercel', netlify: 'Netlify' };
+export const NAMES = { xero: 'Xero', 'quickbooks-online': 'QuickBooks Online', hubspot: 'HubSpot', shopify: 'Shopify', stripe: 'Stripe', supabase: 'Supabase', vercel: 'Vercel', netlify: 'Netlify', n8n: 'n8n' };
 export const PLATFORMS = {
   xero: ['xero'],
   'quickbooks-online': ['quickbooks-online', 'quickbooks', 'qbo', 'quickbooks online', 'intuit quickbooks'],
@@ -45,6 +55,7 @@ export const PLATFORMS = {
   supabase: ['supabase'],
   vercel: ['vercel'],
   netlify: ['netlify'],
+  n8n: ['n8n'],
 };
 
 const norm = (s = '') => String(s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();
@@ -414,6 +425,8 @@ async function recheck({ share } = {}) {
     lines.push(formatRecheckItem(it, rec, now));
   }
   lines.push('', 'Changes are what Lode\'s published record says now against what it said when chosen. Anything not listed is not documented by Lode.');
+  const adrs = syncAdrs(f, { now });
+  if (adrs.length) lines.push('', `Decision records updated: ${adrs.join('; ')}.`);
   if (share) lines.push('', await shareRetention(f, [...new Set(f.integrations.map((x) => x.platform))]));
   return lines.join('\n');
 }
@@ -433,13 +446,368 @@ async function drop(app, platform, { reason, switched, share } = {}) {
   if (code) it.reason = code; else delete it.reason;
   it.dropped_at = new Date().toISOString();
   writeLocal(f);
+  const adrs = syncAdrs(f);
   let text = `Marked ${id} as ${it.state}${it.switched_to ? ` for ${it.switched_to}` : ''}${it.reason ? ` (reason: ${it.reason})` : ''} in ${LOCAL_FILE}. Nothing was sent.`;
   if (unresolved) text += `\n"${unresolved}" is not in Lode on ${index.name}; it was not recorded. If the user agrees, tell Lode: node lode.mjs request "${unresolved}" ${eco}`;
+  if (adrs.length) text += `\nDecision record updated: ${adrs.join('; ')}.`;
   if (it.switched_to) text += `\nTo track the new integration too: node lode.mjs chose "${switched}" ${eco} (saves locally; add --share only if the user agrees)`;
   if (share) {
     const r = await post('/v1/feedback/retention', { project: f.project, platform: eco, items: retentionPayload(f, eco).items.filter((x) => x.id === id) });
     text = text.replace(' Nothing was sent.', '') + (r.recorded ? '\nShared with Lode: the project code, this integration\'s Lode id, its new state, the reason code and how many days it was kept.' : `\nLode did not record it${r.message ? `: ${r.message}` : ''}.`);
   }
+  return text;
+}
+
+// ---- D55 (LOD-102): integration decision records. `adr` writes docs/adr/NNN-<platform>-<app>.md in the
+// current folder: a short record built only from Lode's public facts, with a structured block of fixed
+// codes in its frontmatter. Nothing is sent unless --share is added after the user agrees; then only the
+// project code, platform, Lode record ids (other options only as a count), the codes, the status and the days since.
+export const DECISION_STATUSES = ['proposed', 'accepted', 'shipped', 'kept', 'dropped', 'swapped'];
+export const CONSTRAINTS = ['plan-wall', 'rate-limit', 'missing-object', 'one-way-only', 'timeout', 'webhook-gap', 'region', 'currency', 'auth', 'price', 'other'];
+export const WORKAROUNDS = ['custom-retry', 'custom-idempotency', 'polling-not-webhooks', 'extra-sync-tool', 'manual-step', 'plan-upgrade', 'custom-field-mapping', 'batching-for-rate-limits', 'background-job-for-timeouts', 'currency-handling', 'other'];
+export const ADR_DIR = join('docs', 'adr');
+export const dmy = (iso) => { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}-${m[2]}-${m[1]}` : 'unknown date'; };
+const today = (now = new Date()) => new Date(now).toISOString().slice(0, 10);
+
+// Codes from a comma list; any code outside the fixed list refuses the command (returns the bad ones)
+export function checkCodes(value, allowed) {
+  const given = typeof value === 'string' ? value.split(',').map((x) => x.trim().toLowerCase()).filter(Boolean) : [];
+  return { codes: [...new Set(given.filter((c) => allowed.includes(c)))], bad: given.filter((c) => !allowed.includes(c)) };
+}
+
+// Frontmatter: one `key: value` per line, values as JSON (valid YAML), so the file needs no YAML library
+export function parseAdr(text) {
+  // CRLF and a leading BOM are accepted: git on Windows (core.autocrlf) checks the file out with CRLF
+  const m = String(text).match(/^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
+  if (!m) return null;
+  const meta = {};
+  for (const line of m[1].split(/\r?\n/)) {
+    const i = line.indexOf(':');
+    if (i < 1) continue;
+    const k = line.slice(0, i).trim(), v = line.slice(i + 1).trim();
+    try { meta[k] = JSON.parse(v); } catch { meta[k] = v; }
+  }
+  return meta.lode_adr ? { meta, body: text.slice(m[0].length) } : null;
+}
+const ADR_KEYS = ['lode_adr', 'project', 'platform', 'considered', 'chosen', 'reason', 'status', 'constraints', 'workarounds', 'decided', 'updated', 'rechecked', 'switched_to'];
+export const adrFrontmatter = (meta) => `---\n${ADR_KEYS.filter((k) => meta[k] !== undefined).map((k) => `${k}: ${JSON.stringify(meta[k])}`).join('\n')}\n---\n`;
+const label = (c) => c.replace(/-/g, ' ');
+export function adrCodesBlock(meta) {
+  const c = meta.constraints || [], w = meta.workarounds || [];
+  return ['<!-- lode:codes -->', `Constraints hit: ${c.length ? c.map(label).join(', ') : 'none recorded'}`, '', `Workarounds built: ${w.length ? w.map(label).join(', ') : 'none recorded'}`, '<!-- /lode:codes -->'].join('\n');
+}
+const statusLine = (meta) => `**Status:** ${meta.status} (${dmy(meta.updated || meta.decided)})${meta.switched_to ? `, switched to ${meta.switched_to}` : ''}`;
+
+// The facts for one option, each line with its Lode page and last-verified date. Built only from the
+// public record; anything the record doesn't hold is "not documented", never "not supported".
+export function adrFacts(opt, ecoName) {
+  const r = opt.rec;
+  if (!r) return [`### ${opt.name}${opt.chosen ? ' (chosen)' : ''}`, `Lode has no record of ${opt.name} on ${ecoName}: not documented by Lode, which does not mean no integration exists.`];
+  const at = `[Lode](${r.url}), verified ${dmy(r.verification?.last_verified)}`;
+  const src = Object.fromEntries((r.sources || []).map((s) => [s.id, s.url]));
+  const out = [`### ${r.app?.name || opt.name}${opt.chosen ? ' (chosen)' : ''}`, `Lode page: ${r.url} (last verified ${dmy(r.verification?.last_verified)})`];
+  if (r.lode?.publish_state !== 'live') out.push('Held by Lode: these facts are not yet confirmed.');
+  const c = r.connection || {};
+  out.push(`- Built by: ${c.built_by || 'not documented'}. ${at}`);
+  for (const s of r.sync || []) out.push(`- ${s.object}: ${DIR[s.direction] || s.direction}${s.notes ? `. ${s.notes}` : ''}${(s.src || []).length ? ` (source: ${(s.src || []).map((id) => src[id]).filter(Boolean).join(' ')})` : ''}. ${at}`);
+  if (!(r.sync || []).length) out.push(`- What syncs: not documented. ${at}`);
+  out.push(`- Price: ${priceLine(r)}. ${at}`);
+  const plan = r.requirements?.ecosystem_plan_min;
+  out.push(`- ${ecoName} plan needed: ${plan && plan !== 'unknown' ? plan : 'not documented'}. ${at}`);
+  const reg = r.regions || {};
+  out.push(`- Regions: ${reg.basis === 'no-restriction-stated' ? 'no restriction stated' : (reg.supported || []).join(', ') || 'not documented'}. ${at}`);
+  for (const l of r.limitations || []) out.push(`- Limitation: ${String(l.summary).replace(/[.\s]*$/, '.')} ${at}`);
+  return out;
+}
+
+export function adrMarkdown(meta, options, ecoName, n) {
+  const chosen = options.find((o) => o.chosen);
+  const title = `# ${String(n).padStart(3, '0')}. ${chosen?.rec?.app?.name || chosen?.name || meta.chosen} for ${ecoName}`;
+  return [
+    adrFrontmatter(meta) + title, '', statusLine(meta), '',
+    '## Context', `Integration needed on ${ecoName}. Options considered: ${options.map((o) => o.rec?.app?.name || o.name).join(', ')}.`, '',
+    '## Decision', `Chose ${chosen?.rec?.app?.name || chosen?.name || meta.chosen}${meta.reason ? `. Main reason: ${label(meta.reason)}` : ''}.`, '',
+    '## Constraints and workarounds', adrCodesBlock(meta), '',
+    `## Facts from Lode on ${dmy(meta.decided)}`, ...options.flatMap((o) => [...adrFacts(o, ecoName), '']),
+    'Facts are from Lode\'s public records (trylode.io), each with its Lode page and last-verified date. Anything not listed is not documented by Lode, which does not mean it is unsupported. Re-check with: node lode.mjs recheck', '',
+  ].join('\n');
+}
+
+// Update the frontmatter, the status line and the codes block; the rest of the file is left as written
+export function applyAdrUpdate(text, changes) {
+  const p = parseAdr(text);
+  if (!p) throw new Error('not a Lode decision record (no lode_adr frontmatter)');
+  const meta = { ...p.meta, ...changes };
+  for (const k of ['constraints', 'workarounds']) if (changes[k]) meta[k] = [...new Set([...(p.meta[k] || []), ...changes[k]])];
+  let body = p.body.replace(/^\*\*Status:\*\*.*$/m, statusLine(meta));
+  body = /<!-- lode:codes -->[\s\S]*?<!-- \/lode:codes -->/.test(body) ? body.replace(/<!-- lode:codes -->[\s\S]*?<!-- \/lode:codes -->/, adrCodesBlock(meta)) : `${body.trimEnd()}\n\n## Constraints and workarounds\n${adrCodesBlock(meta)}\n`;
+  return { meta, text: adrFrontmatter(meta) + body };
+}
+
+// What --share sends for a decision: codes and ids only
+export function decisionPayload(meta, now = new Date()) {
+  const days = daysBetween(meta.decided, now);
+  // Only Lode record ids leave the machine. Options Lode has no record of (an in-house tool, another
+  // product) stay in the local file; only how many there were is sent.
+  const isId = (x) => typeof x === 'string' && x.includes('--');
+  const others = (meta.considered || []).filter((x) => !isId(x)).length;
+  return { project: meta.project, platform: meta.platform, considered: (meta.considered || []).filter(isId), chosen: isId(meta.chosen) ? meta.chosen : 'other', ...(others ? { other_options: others } : {}), ...(meta.reason ? { reason: meta.reason } : {}), status: meta.status, constraints: meta.constraints || [], workarounds: meta.workarounds || [], ...(days !== undefined ? { days } : {}) };
+}
+
+const adrDir = () => join(process.cwd(), ADR_DIR);
+export function listAdrs(dir = adrDir()) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).filter((f) => /^\d{3,}-.*\.md$/.test(f)).sort().map((f) => { const path = join(dir, f); const p = parseAdr(readFileSync(path, 'utf8')); return p ? { file: f, path, meta: p.meta } : null; }).filter(Boolean);
+}
+export const nextAdrNumber = (dir = adrDir()) => (existsSync(dir) ? readdirSync(dir).map((f) => Number((f.match(/^(\d{3,})-/) || [])[1] || 0)).reduce((a, b) => Math.max(a, b), 0) : 0) + 1;
+
+async function shareDecision(meta) {
+  const r = await post('/v1/feedback/decision', decisionPayload(meta));
+  return r.recorded ? 'Shared with Lode (the user agreed): the project code, platform, the Lode ids considered and chosen, the reason, status, constraint and workaround codes, and the days since the decision.' : `Lode did not record the decision${r.message ? `: ${r.message}` : ''}.`;
+}
+
+async function adr(platform, opts) {
+  const bad = [];
+  const cons = checkCodes(opts.constraint, CONSTRAINTS), work = checkCodes(opts.workaround, WORKAROUNDS);
+  if (cons.bad.length) bad.push(`constraint ${cons.bad.join(', ')} (allowed: ${CONSTRAINTS.join(', ')})`);
+  if (work.bad.length) bad.push(`workaround ${work.bad.join(', ')} (allowed: ${WORKAROUNDS.join(', ')})`);
+  if (typeof opts.reason === 'string' && !CHOICE_REASONS.includes(opts.reason)) bad.push(`reason ${opts.reason} (allowed: ${CHOICE_REASONS.join(', ')})`);
+  if (typeof opts.status === 'string' && !DECISION_STATUSES.includes(opts.status)) bad.push(`status ${opts.status} (allowed: ${DECISION_STATUSES.join(', ')})`);
+  if (bad.length) return `Refused: unknown code. ${bad.join('; ')}. Nothing was written or sent.`;
+
+  if (typeof opts.update === 'string') {
+    const path = opts.update;
+    if (!existsSync(path)) return `No file at ${path}.`;
+    const changes = { updated: today() };
+    if (typeof opts.status === 'string') changes.status = opts.status;
+    if (typeof opts.reason === 'string') changes.reason = opts.reason;
+    if (cons.codes.length) changes.constraints = cons.codes;
+    if (work.codes.length) changes.workarounds = work.codes;
+    let u;
+    try { u = applyAdrUpdate(readFileSync(path, 'utf8'), changes); } catch (e) { return `Not updated: ${e.message}.`; }
+    writeFileSync(path, u.text);
+    let text = `Updated ${path}: status ${u.meta.status}; constraints ${(u.meta.constraints || []).join(', ') || 'none'}; workarounds ${(u.meta.workarounds || []).join(', ') || 'none'}.`;
+    text += opts.share === true ? `\n${await shareDecision(u.meta)}` : '\nNot sent to Lode. Only if the user agrees to share this decision\'s codes anonymously, run this again with --share.';
+    return text;
+  }
+
+  const considered = list(typeof opts.considered === 'string' ? opts.considered : undefined) || [];
+  if (typeof opts.chose !== 'string' || !slugish(opts.chose)) return 'Name the app chosen: node lode.mjs adr <platform> --considered "A,B" --chose B';
+  const { eco, index } = await platformIndex(platform);
+  const entries = (index?.integrations || []).map((i) => ({ ...i, name: i.app }));
+  const resolve = (a) => {
+    const hits = matchApp(a, entries);
+    if (hits.length > 1) throw new Error(`"${a}" matches more than one app on ${index.name}: ${hits.map((h) => h.app).join('; ')}. Use the exact name`);
+    return hits.length ? { key: hits[0].id, name: hits[0].app, id: hits[0].id } : { key: slugish(a).slice(0, 60), name: a.slice(0, 60) };
+  };
+  let options;
+  try {
+    const all = [...considered, opts.chose].map(resolve);
+    options = [];
+    for (const o of all) if (o.key && !options.some((x) => x.key === o.key)) options.push(o);
+  } catch (e) { return `Not written: ${e.message}.`; }
+  options = options.slice(0, 10);
+  const chosenKey = resolve(opts.chose).key;
+  if (!options.some((o) => o.key === chosenKey)) options[options.length - 1] = resolve(opts.chose);
+  for (const o of options) { o.chosen = o.key === chosenKey; o.rec = o.id ? await get(`/api/integrations/${eco}/${o.id.split('--')[0]}.json`) : null; }
+
+  const f = readLocal() || freshFile();
+  const chosenOpt = options.find((o) => o.chosen);
+  if (chosenOpt.rec) rememberChoice(f, chosenOpt.rec, eco);
+  writeLocal(f);
+  const now = today();
+  const meta = { lode_adr: 1, project: f.project, platform: eco, considered: options.map((o) => o.key), chosen: chosenKey, ...(typeof opts.reason === 'string' ? { reason: opts.reason } : {}), status: typeof opts.status === 'string' ? opts.status : 'proposed', constraints: cons.codes, workarounds: work.codes, decided: now, updated: now };
+  const n = nextAdrNumber();
+  mkdirSync(adrDir(), { recursive: true });
+  const file = join(ADR_DIR, `${String(n).padStart(3, '0')}-${eco}-${String(chosenKey).split('--')[0]}.md`);
+  writeFileSync(join(process.cwd(), file), adrMarkdown(meta, options, index.name, n));
+  let text = `Wrote ${file} (status ${meta.status}). It holds Lode's facts for each option, with links and last-verified dates.${chosenOpt.rec ? ` Saved the choice to ${LOCAL_FILE} too, so recheck and drop keep the record current.` : ''}\nWhen it ships or hits a limit: node lode.mjs adr --update ${file} --status shipped [--constraint ${CONSTRAINTS[0]}] [--workaround ${WORKAROUNDS[0]}]`;
+  text += opts.share === true ? `\n${await shareDecision(meta)}` : `\nNot sent to Lode. Only if the user agrees to share the decision's codes anonymously, run: node lode.mjs adr --update ${file} --share`;
+  return text;
+}
+
+// recheck and drop keep a matching decision record in step with lode-integrations.json: the recheck date,
+// and dropped or swapped when the integration was. They never mark a decision kept (the user says that
+// with adr --update). Nothing is sent from here.
+export function syncAdrs(f, { now = new Date(), dir = adrDir() } = {}) {
+  const changed = [];
+  for (const a of listAdrs(dir)) {
+    const it = f.integrations.find((x) => x.id === a.meta.chosen);
+    if (!it) continue;
+    const changes = { rechecked: today(now) };
+    if (it.state !== 'kept' && a.meta.status !== it.state) Object.assign(changes, { status: it.state, updated: today(now), ...(it.switched_to ? { switched_to: it.switched_to } : {}) });
+    const u = applyAdrUpdate(readFileSync(a.path, 'utf8'), changes);
+    writeFileSync(a.path, u.text);
+    if (changes.status) changed.push(`${join(ADR_DIR, a.file)}: status ${changes.status}`);
+  }
+  return changed;
+}
+
+// ---- D56 (LOD-102): stack check. Reads only the manifest files below (and only the variable NAMES in
+// .env.example, never values), maps them to Lode apps and platforms with /api/stack-signals.json, and
+// reports Lode's facts for that stack. Nothing is sent unless --share is added after the user agrees.
+export const MANIFESTS = ['package.json', 'requirements.txt', 'pyproject.toml', 'Gemfile', 'go.mod', '.env.example', 'vercel.json', 'netlify.toml', join('supabase', 'config.toml')];
+export function parsePackageJson(text) {
+  try { const j = JSON.parse(text); return [...new Set(['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies'].flatMap((k) => Object.keys(j?.[k] || {})))]; } catch { return []; }
+}
+const pyName = (s) => (String(s).trim().match(/^([A-Za-z0-9][A-Za-z0-9._-]*)/) || [])[1];
+export function parseRequirements(text) {
+  return [...new Set(String(text).split('\n').map((l) => l.replace(/#.*/, '').trim()).filter((l) => l && !l.startsWith('-')).map(pyName).filter(Boolean))];
+}
+export function parsePyproject(text) {
+  const out = new Set();
+  const t = String(text);
+  for (const m of t.matchAll(/^\s*(?:dependencies|requires)\s*=\s*\[([\s\S]*?)\]/gm)) for (const q of m[1].matchAll(/["']([^"']+)["']/g)) { const n = pyName(q[1]); if (n) out.add(n); }
+  for (const sec of t.matchAll(/^\[tool\.poetry\.(?:dev-)?dependencies\]\n([\s\S]*?)(?=^\[|$(?![\s\S]))/gm)) for (const l of sec[1].split('\n')) { const n = (l.match(/^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*=/) || [])[1]; if (n && n !== 'python') out.add(n); }
+  return [...out];
+}
+export function parseGemfile(text) { return [...new Set([...String(text).matchAll(/^\s*gem\s+["']([^"']+)["']/gm)].map((m) => m[1]))]; }
+export function parseGoMod(text) {
+  const out = new Set();
+  const t = String(text);
+  for (const m of t.matchAll(/^require\s+\(([\s\S]*?)\)/gm)) for (const l of m[1].split('\n')) { const p = l.trim().split(/\s+/)[0]; if (p && !p.startsWith('//')) out.add(p); }
+  for (const m of t.matchAll(/^require\s+([^\s(]+)\s+/gm)) out.add(m[1]);
+  return [...out];
+}
+// Variable names only: the part before "=" on each line. Values are never read into the result.
+export function parseEnvNames(text) { return [...new Set(String(text).split('\n').map((l) => (l.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=/) || [])[1]).filter(Boolean))]; }
+
+export function readManifests(dir = process.cwd()) {
+  const read = (f) => { const p = join(dir, f); return existsSync(p) ? readFileSync(p, 'utf8') : null; };
+  const pkg = read('package.json'), req = read('requirements.txt'), py = read('pyproject.toml'), gem = read('Gemfile'), gomod = read('go.mod'), env = read('.env.example');
+  return {
+    npm: pkg ? parsePackageJson(pkg) : [], pypi: [...(req ? parseRequirements(req) : []), ...(py ? parsePyproject(py) : [])], gem: gem ? parseGemfile(gem) : [], go: gomod ? parseGoMod(gomod) : [],
+    env: env ? parseEnvNames(env) : [], files: MANIFESTS.filter((f) => existsSync(join(dir, f))).map((f) => f.split('\\').join('/')),
+  };
+}
+
+const FRAMEWORK_SIGNS = [['nextjs', 'npm', 'next'], ['remix', 'npm', '@remix-run/react'], ['astro', 'npm', 'astro'], ['sveltekit', 'npm', '@sveltejs/kit'], ['nuxt', 'npm', 'nuxt'], ['angular', 'npm', '@angular/core'], ['nestjs', 'npm', '@nestjs/core'], ['express', 'npm', 'express'], ['react', 'npm', 'react'], ['vue', 'npm', 'vue'], ['django', 'pypi', 'django'], ['fastapi', 'pypi', 'fastapi'], ['flask', 'pypi', 'flask'], ['rails', 'gem', 'rails']];
+export function detectFramework(m) {
+  for (const [fw, kind, name] of FRAMEWORK_SIGNS) if ((m[kind] || []).some((x) => x.toLowerCase() === name)) return fw;
+  return (m.go || []).length ? 'go' : undefined;
+}
+
+// Manifests -> the stack-signal products found, each with what matched (kept on the user's machine)
+export function detectStack(m, doc) {
+  const pub = doc.env_public_prefixes || [];
+  const envs = (m.env || []).map((n) => { const u = n.toUpperCase(); const p = pub.find((x) => u.startsWith(x)); return p ? u.slice(p.length) : u; });
+  const lower = (a) => (a || []).map((x) => x.toLowerCase());
+  const has = { npm: lower(m.npm), pypi: lower(m.pypi).map((x) => x.replace(/_/g, '-')), gem: lower(m.gem), go: lower(m.go) };
+  const apps = [];
+  for (const s of doc.signals || []) {
+    const evidence = [];
+    for (const k of ['npm', 'pypi', 'gem']) for (const p of s[k] || []) if (has[k].includes(k === 'pypi' ? p.toLowerCase().replace(/_/g, '-') : p.toLowerCase())) evidence.push(`${k} ${p}`);
+    for (const p of s.go || []) if (has.go.some((x) => x === p.toLowerCase() || x.startsWith(`${p.toLowerCase()}/`))) evidence.push(`go ${p}`);
+    for (const e of s.env || []) if (envs.some((n) => n.startsWith(e))) evidence.push(`env ${e}*`);
+    for (const f of s.files || []) if ((m.files || []).includes(f)) evidence.push(`file ${f}`);
+    if (evidence.length) apps.push({ id: s.id, name: s.name, vendor: s.vendor ?? null, ...(s.platform ? { platform: s.platform } : {}), ...(s.app ? { app: s.app } : {}), evidence });
+  }
+  return apps;
+}
+
+// LOD-102: kept identical in logic to stackPairs and stackCheck in Lode's src/lib/stackcheck.mjs (tests check both agree).
+export const STACK_NOTE = 'Facts from Lode\'s published records and the platforms\' own docs, each with its link. Lode does not read or judge your code. An app with no Lode record on a platform is not documented by Lode, not unsupported; a plan or limit not listed is not documented. Limits are the platform\'s published numbers on the date read.';
+export function stackPairs({ apps = [], platforms = [] }, { listings = {}, covered = [] } = {}) {
+  const inStack = [...new Set([...platforms, ...apps.map((a) => a.platform).filter(Boolean)])];
+  const live = inStack.filter((p) => covered.includes(p)).sort();
+  const known = new Set(Object.values(listings).flat());
+  const pairs = [];
+  for (const platform of live) {
+    for (const a of apps) {
+      if (a.platform === platform) continue;
+      const own = (a.vendor ? listings[a.vendor] ?? [] : []).filter((id) => id.endsWith(`--${platform}`));
+      const ids = a.app ? [`${a.app}--${platform}`].filter((id) => known.has(id)) : own;
+      pairs.push({ platform, app: a.name, ids });
+    }
+  }
+  return { platforms: live, not_covered: inStack.filter((p) => !covered.includes(p)).sort(), pairs };
+}
+
+export function stackCheck(input, data, overlap) {
+  const { platforms, not_covered, pairs } = stackPairs(input, data);
+  const byId = new Map((data.records ?? []).filter(Boolean).map((r) => [r.id, r]));
+  const names = data.names ?? {};
+  const out = [];
+  for (const platform of platforms) {
+    const here = pairs.filter((p) => p.platform === platform);
+    const recs = [...new Set(here.flatMap((p) => p.ids))].map((id) => byId.get(id)).filter(Boolean).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const integrations = recs.map((r) => {
+      const req = r.requirements ?? {};
+      const src = Object.fromEntries((r.sources ?? []).map((s) => [s.id, s.url]));
+      const plan = req.ecosystem_plan_min && req.ecosystem_plan_min !== 'unknown' ? req.ecosystem_plan_min : null;
+      const planSources = plan ? [...new Set((req.src ?? []).map((id) => src[id]).filter(Boolean))] : [];
+      return {
+        id: r.id, app: r.app?.name ?? r.id, url: r.url, last_verified: r.verification?.last_verified ?? null,
+        ...(r.lode?.publish_state === 'live' ? {} : { held: true }),
+        plan_needed: plan ?? 'not documented', ...(planSources.length ? { plan_sources: planSources } : {}),
+      };
+    });
+    const missing = here.filter((p) => !p.ids.some((id) => byId.has(id))).map((p) => p.app).sort();
+    const ov = recs.length >= 2 ? overlap(platform, recs) : null;
+    const limits = (data.limits ?? []).filter((l) => l.platform === platform).map((l) => ({
+      product: l.product, limit: l.limit, plan: l.plan ?? null, seconds: l.seconds, ...(l.condition ? { condition: l.condition } : {}),
+      url: l.source.url, quote: l.source.quote, retrieved_at: l.source.retrieved_at,
+    }));
+    out.push({
+      platform, name: names[platform] ?? platform, integrations, not_in_lode: missing,
+      ...(ov ? { overlap: { shared_objects: ov.shared_objects, writes: ov.writes.filter((w) => w.apps.length > 1), two_way_pairs: ov.two_way_pairs, documented_no_direction: ov.documented_no_direction } } : {}),
+      limits,
+    });
+  }
+  return {
+    ...(input.framework ? { framework: input.framework } : {}),
+    apps: (input.apps ?? []).map((a) => ({ name: a.name, vendor: a.vendor ?? null, ...(a.platform ? { platform: a.platform } : {}) })),
+    ...(input.unrecognised?.length ? { unrecognised: [...input.unrecognised] } : {}),
+    platforms: out, platforms_not_covered: not_covered,
+    note: STACK_NOTE,
+  };
+}
+
+const secs = (s) => (s >= 60 && s % 60 === 0 ? `${s}s (${s / 60} min)` : s < 1 ? `${Math.round(s * 1000)} ms` : `${s}s`);
+export function formatStack(res, detected = []) {
+  const out = [`## Stack check: ${res.apps.length} app(s) and platform(s) found${res.framework ? `, framework ${res.framework}` : ''}`];
+  for (const d of detected) out.push(`- ${d.name}${d.platform ? ' (platform)' : ''}: ${d.evidence.join(', ')}${d.vendor ? '' : ' | no Lode vendor yet'}`);
+  for (const p of res.platforms) {
+    out.push('', `### ${p.name}`);
+    if (p.integrations.length) out.push('Lode records for the other apps in this stack:');
+    for (const i of p.integrations) out.push(`- ${i.app}: ${p.name} plan needed: ${i.plan_needed}${i.plan_sources ? ` [${i.plan_sources.join(' ')}]` : ''} | ${i.url} | verified ${dmy(i.last_verified)}${i.held ? ' | HELD: not yet confirmed by Lode' : ''}`);
+    if (p.not_in_lode.length) out.push(`Not in Lode on ${p.name}: ${p.not_in_lode.join(', ')} (not documented by Lode, not unsupported).`);
+    const shared = p.overlap?.writes || [];
+    if (shared.length) {
+      out.push(`Objects more than one of these apps writes into ${p.name}:`);
+      for (const w of shared) out.push(`- ${w.object}: ${w.apps.map((a) => `${a.app} (${DIR[a.direction] || a.direction}) [${a.sources.join(' ')}]`).join('; ')}`);
+      for (const t of p.overlap.two_way_pairs) out.push(`  Both two-way: ${t.apps.join(' and ')} on ${t.object}`);
+    } else if (p.overlap) out.push(`No object is documented as written into ${p.name} by more than one of these apps.`);
+    if (p.limits.length) {
+      out.push(`${p.name} function run-time limits (the platform's docs):`);
+      for (const l of p.limits) out.push(`- ${l.product}, ${l.limit.replace(/-/g, ' ')}${l.plan ? `, ${l.plan}` : ''}: ${secs(l.seconds)}${l.condition ? ` (${l.condition})` : ''}. "${l.quote}" ${l.url} (read ${dmy(l.retrieved_at)})`);
+    }
+  }
+  if (res.platforms_not_covered.length) out.push('', `Platforms Lode does not cover yet: ${res.platforms_not_covered.join(', ')}.`);
+  if (!res.platforms.length) out.push('', 'No platform Lode covers was found in these files (Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n).');
+  out.push('', res.note);
+  return out.join('\n');
+}
+
+async function stack({ share, framework } = {}) {
+  const m = readManifests();
+  const found = m.files.filter((f) => f !== '.env.example' || m.env.length);
+  if (!found.length) return `No manifest files in this folder. The stack check reads only: ${MANIFESTS.join(', ')} (variable names only from .env.example).`;
+  const [doc, limitsDoc, index, vendors] = await Promise.all([get('/api/stack-signals.json'), get('/api/platform-limits.json'), get('/api/index.json'), get('/api/vendors/index.json')]);
+  const detected = detectStack(m, doc || {});
+  const fw = typeof framework === 'string' ? framework.toLowerCase() : detectFramework(m);
+  const covered = (index?.ecosystems || []).filter((e) => e.status !== 'planned').map((e) => e.slug);
+  const listings = Object.fromEntries((vendors?.vendors || []).map((v) => [v.id, v.integrations || []]));
+  const input = { apps: detected, platforms: [], ...(fw ? { framework: fw } : {}) };
+  const ids = [...new Set(stackPairs(input, { listings, covered }).pairs.flatMap((p) => p.ids))];
+  const records = (await Promise.all(ids.map((id) => get(`/api/integrations/${id.split('--')[1]}/${id.split('--')[0]}.json`)))).filter(Boolean);
+  const res = stackCheck(input, { records, listings, covered, limits: limitsDoc?.limits || [], names: Object.fromEntries((index?.ecosystems || []).map((e) => [e.slug, e.name])) }, stackOverlap);
+  let text = `Read: ${found.join(', ')}\n` + formatStack(res, detected);
+  if (share) {
+    const body = { platforms: detected.filter((d) => d.platform).map((d) => d.platform), apps: detected.filter((d) => !d.platform).map((d) => d.id), ...(fw ? { framework: fw } : {}) };
+    const r = await post('/v1/feedback/stack-manifest', body);
+    text += r.recorded ? '\n\nShared with Lode (the user agreed): the app and platform codes found, and the framework.' : `\n\nLode did not record the stack${r.message ? `: ${r.message}` : ''}.`;
+  } else text += '\n\nNot sent to Lode. Only if the user agrees to share the app and platform codes anonymously, run this again with --share.';
   return text;
 }
 
@@ -520,8 +888,16 @@ async function main(argv) {
     const opts = { reason: flag('--reason'), switched: flag('--switched-to'), share: flag('--share') };
     return drop(rest[0], rest[1], { reason: opts.reason, switched: opts.switched, share: opts.share === true });
   }
+  if (cmd === 'adr' && (rest[0] || rest.includes('--update'))) {
+    const opts = { update: flag('--update'), considered: flag('--considered'), chose: flag('--chose'), reason: flag('--reason'), status: flag('--status'), constraint: flag('--constraint'), workaround: flag('--workaround'), share: flag('--share') };
+    return adr(rest[0], opts);
+  }
+  if (cmd === 'stack') {
+    const opts = { framework: flag('--framework'), share: flag('--share') };
+    return stack({ framework: opts.framework, share: opts.share === true });
+  }
   if (cmd === 'platforms') return `Lode covers: ${Object.keys(PLATFORMS).join(', ')}. Facts are source-linked and dated; see https://trylode.io/methodology/`;
-  return 'Usage:\n  node lode.mjs check <app> [platform]\n  node lode.mjs find <platform> [--category c] [--needs a,b] [--region XX] [--stack a,b] [--framework f]\n  node lode.mjs list <platform> [--category <c>] [--all]\n  node lode.mjs chose <app|none> <platform> [--considered "A,B"] [--reason code] [--share]\n  node lode.mjs outcome <app> <platform> <integrated|failed|abandoned|not-tried> [--failure-reason code] [--share]\n  node lode.mjs request <app> <platform> [--needs a,b] [--region XX]\n  node lode.mjs overlap <platform> --apps "A,B,C" [--region XX] [--share]\n  node lode.mjs recheck [--share]\n  node lode.mjs drop <app> <platform> [--reason code] [--switched-to <app>] [--share]\n  node lode.mjs platforms';
+  return 'Usage:\n  node lode.mjs check <app> [platform]\n  node lode.mjs find <platform> [--category c] [--needs a,b] [--region XX] [--stack a,b] [--framework f]\n  node lode.mjs list <platform> [--category <c>] [--all]\n  node lode.mjs chose <app|none> <platform> [--considered "A,B"] [--reason code] [--share]\n  node lode.mjs outcome <app> <platform> <integrated|failed|abandoned|not-tried> [--failure-reason code] [--share]\n  node lode.mjs request <app> <platform> [--needs a,b] [--region XX]\n  node lode.mjs overlap <platform> --apps "A,B,C" [--region XX] [--share]\n  node lode.mjs recheck [--share]\n  node lode.mjs drop <app> <platform> [--reason code] [--switched-to <app>] [--share]\n  node lode.mjs adr <platform> --considered "A,B" --chose B [--reason code] [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs adr --update <file> [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs stack [--framework f] [--share]\n  node lode.mjs platforms';
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('lode.mjs')) {
