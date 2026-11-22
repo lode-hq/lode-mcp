@@ -65,6 +65,12 @@ Or add it to a project's `.mcp.json`:
 url = "https://trylode.io/mcp"
 ```
 
+**Gemini CLI:** install the extension from this repository:
+
+```bash
+gemini extensions install https://github.com/lode-hq/lode-mcp
+```
+
 **Any other client** that supports Streamable HTTP: point it at `https://trylode.io/mcp`.
 
 ## Tools
