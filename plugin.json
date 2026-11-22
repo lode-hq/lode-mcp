@@ -1,0 +1,58 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "lode",
+  "version": "0.10.2",
+  "description": "Source-linked facts on apps that integrate with Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify and n8n: what syncs and which way, prices, plans, regions, limits. Check Lode before recommending, comparing, installing or provisioning an integration.",
+  "author": {
+    "name": "Lode",
+    "email": "support@trylode.io",
+    "url": "https://trylode.io"
+  },
+  "homepage": "https://trylode.io/agents/",
+  "repository": "https://github.com/lode-hq/lode-mcp",
+  "license": "MIT",
+  "keywords": [
+    "integrations",
+    "integration-facts",
+    "xero",
+    "quickbooks",
+    "hubspot",
+    "shopify",
+    "stripe",
+    "supabase",
+    "vercel",
+    "netlify",
+    "n8n",
+    "mcp"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Lode",
+        "shortDescription": "Sourced app integration facts",
+        "longDescription": "Lode is an independent database of verified facts about apps that integrate with HubSpot, n8n, Netlify, QuickBooks Online, Shopify, Stripe, Supabase, Vercel and Xero. Ask which app to use, or check one before you install it, and ChatGPT can answer from Lode: what actually syncs and in which direction, prices by currency, the platform plan needed, regions, known limitations and who built the integration.\n\nEvery fact links to the page it came from and shows when it was last checked. Something Lode doesn't list means \"not documented\", never \"not supported\". Rankings are based on fit to your needs (what must sync, region, budget) and are never sold.\n\nUse it to find apps for a job on a platform, compare two to four apps side by side, check one integration before installing it (including Vercel Marketplace integrations and Netlify extensions), see what changed recently, and check whether apps already connected to one platform write the same data into it.\n\nNo sign-in is needed. Eight tools only read Lode's public records. Three feedback tools (request coverage, report a choice, report a wrong fact) and the optional share setting on the two stack checks send short, structured reports to Lode, with no free text, and are used only when you agree.",
+        "developerName": "Lode",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Find apps for a platform, ranked by fit to what must sync, region and budget",
+          "Compare two to four integrations side by side",
+          "Show one integration's sync, price, plan, regions and limits with sources",
+          "Check a project's stack for overlapping apps and platform limits",
+          "See recent changes to prices, sync and limits"
+        ],
+        "websiteURL": "https://trylode.io",
+        "privacyPolicyURL": "https://trylode.io/privacy/",
+        "termsOfServiceURL": "https://trylode.io/agents/",
+        "defaultPrompt": [
+          "Which Xero inventory apps sync purchase orders, and what do they cost in NZD?",
+          "Compare Dext and AutoEntry on QuickBooks Online.",
+          "I sell on Shopify and use Xero. Which apps connect them, and which ones sync payouts?"
+        ],
+        "brandColor": "#111111",
+        "brandColorDark": "#FFFFFF",
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}
