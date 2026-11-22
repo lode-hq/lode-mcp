@@ -58,6 +58,16 @@ Or add it to a project's `.mcp.json`:
 }
 ```
 
+**Cline:** MCP Servers > Remote Servers, enter `https://trylode.io/mcp` and choose Streamable HTTP. Or add to `cline_mcp_settings.json` (step-by-step notes for agents in [`llms-install.md`](llms-install.md)):
+
+```json
+{
+  "mcpServers": {
+    "lode": { "type": "streamableHttp", "url": "https://trylode.io/mcp" }
+  }
+}
+```
+
 **Codex:** add to `~/.codex/config.toml`:
 
 ```toml
@@ -83,12 +93,13 @@ gemini extensions install https://github.com/lode-hq/lode-mcp
 | `compare_integrations` | Two to four apps side by side |
 | `get_vendor` | One company's integrations across platforms |
 | `get_changes` | What changed recently: prices, plans and capabilities, with old and new values |
+| `check_stack` | For the apps and platforms a project uses (from `package.json` or config files): the Lode records for them, the platform plans they need, objects more than one app writes, and each platform's function run-time limits |
 | `check_stack_overlap` | Which apps already connected to one platform write the same data into it (possible duplicates), with sources |
 | `request_coverage` | Tell Lode about an integration it doesn't cover yet |
 | `report_choice` | Tell Lode which app was chosen and why (only if the user agrees) |
 | `report_error` | Report a fact that looks wrong |
 
-The first six only read. `check_stack_overlap` reads unless asked to share the stack. The three feedback tools send structured, anonymous values only, and only when the user agrees. See [privacy](https://trylode.io/privacy/).
+The first six and `check_stack` only read. `check_stack` and `check_stack_overlap` keep the stack only if asked to share it. The three feedback tools send structured, anonymous values only, and only when the user agrees. See [privacy](https://trylode.io/privacy/).
 
 ## Example prompts
 
@@ -127,6 +138,9 @@ Or copy [`skills/lode-integration-check/`](skills/lode-integration-check/) into 
 | [`agents/cursor/lode.mdc`](agents/cursor/lode.mdc) | Cursor rule. Copy into `.cursor/rules/` |
 | [`agents/AGENTS.md`](agents/AGENTS.md) | Snippet for an `AGENTS.md` file (Codex and other agents) |
 | [`agents/chatgpt.md`](agents/chatgpt.md) | Text for ChatGPT custom instructions or a project |
+| [`plugin.json`](plugin.json) + [`mcp.json`](mcp.json) | [Agent Plugins](https://agent-plugins.org) package (MCP server plus the skill): ChatGPT, Codex, Cursor, VS Code |
+| [`.cursor-plugin/plugin.json`](.cursor-plugin/plugin.json) | Cursor plugin: the MCP server, the Cursor rule and the skill |
+| [`llms-install.md`](llms-install.md) | Setup notes for agents installing Lode (Cline) |
 
 ## Also available
 
