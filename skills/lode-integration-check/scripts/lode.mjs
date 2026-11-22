@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Lode Integration Check: verified, source-linked facts about how one product works with another
-// (Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify), read from Lode's
+// (Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n), read from Lode's
 // public JSON API at https://trylode.io/api/. No key, no account, no dependencies (Node 18+).
 //
 //   node lode.mjs check <app> [platform]      facts for one app, on one platform or on every platform Lode covers
@@ -35,7 +35,7 @@ import { join } from 'node:path';
 const BASE = (process.env.LODE_BASE || 'https://trylode.io').replace(/\/$/, '');
 const UA = process.env.LODE_UA || 'lode-skill/0.1 (+https://trylode.io/agents/)';
 
-export const NAMES = { xero: 'Xero', 'quickbooks-online': 'QuickBooks Online', hubspot: 'HubSpot', shopify: 'Shopify', stripe: 'Stripe', supabase: 'Supabase', vercel: 'Vercel', netlify: 'Netlify' };
+export const NAMES = { xero: 'Xero', 'quickbooks-online': 'QuickBooks Online', hubspot: 'HubSpot', shopify: 'Shopify', stripe: 'Stripe', supabase: 'Supabase', vercel: 'Vercel', netlify: 'Netlify', n8n: 'n8n' };
 export const PLATFORMS = {
   xero: ['xero'],
   'quickbooks-online': ['quickbooks-online', 'quickbooks', 'qbo', 'quickbooks online', 'intuit quickbooks'],
@@ -45,6 +45,7 @@ export const PLATFORMS = {
   supabase: ['supabase'],
   vercel: ['vercel'],
   netlify: ['netlify'],
+  n8n: ['n8n', 'n8n.io'],
 };
 
 const norm = (s = '') => String(s).toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim();

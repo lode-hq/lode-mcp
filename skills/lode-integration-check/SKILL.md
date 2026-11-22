@@ -1,6 +1,6 @@
 ---
 name: lode-integration-check
-description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel or Netlify, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?").'
+description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify or n8n, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?").'
 ---
 
 # Lode Integration Check
@@ -12,12 +12,12 @@ sold. Use it so the user gets facts, not guesses, before an integration is chose
 ## When to use
 
 - The user wants to connect one product to another on Xero, QuickBooks Online, HubSpot, Shopify,
-  Stripe, Supabase, Vercel or Netlify.
+  Stripe, Supabase, Vercel, Netlify or n8n.
 - The user wants to add a database (Postgres, Redis), auth, email, storage or another service to a
   Vercel, Netlify or Supabase project, including through the Vercel Marketplace or a Netlify extension.
 - You are about to recommend, compare or install an app or integration on one of those platforms
   (including `vercel integration add`, a Netlify extension, a Supabase partner integration, a Stripe
-  app, or a Xero, QuickBooks, HubSpot or Shopify app).
+  app, an n8n node, or a Xero, QuickBooks, HubSpot or Shopify app).
 - The user asks what syncs, which direction, what it costs, which plan it needs, or whether it works
   in their country.
 - The user already has two or more apps connected to one platform and asks whether they overlap,
@@ -40,7 +40,7 @@ node scripts/lode.mjs list <platform> --category <word>   # everything Lode cove
 ```
 
 Platforms: `xero`, `quickbooks-online` (or `qbo`), `hubspot`, `shopify`, `stripe`, `supabase`,
-`vercel`, `netlify`. Needs are the objects that must sync, comma-separated, e.g.
+`vercel`, `netlify`, `n8n`. Needs are the objects that must sync, comma-separated, e.g.
 `invoices,purchase-orders,contacts`. Add `--stack supabase,nextjs` and `--framework nextjs` when known.
 
 Typical flow: `find` with the user's needs and region, then `check` the one or two best options, then

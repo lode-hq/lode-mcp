@@ -1,6 +1,6 @@
 # Lode MCP server
 
-**Check before you install an integration.** [Lode](https://trylode.io) is an independent, source-linked database of facts about apps that integrate with **HubSpot, Netlify, QuickBooks Online, Shopify, Stripe, Supabase, Vercel and Xero**: what actually syncs and in which direction, prices by currency, regions, plan requirements and known limitations. Every fact links to the vendor page it came from and carries a last-verified date.
+**Check before you install an integration.** [Lode](https://trylode.io) is an independent, source-linked database of facts about apps that integrate with **HubSpot, n8n, Netlify, QuickBooks Online, Shopify, Stripe, Supabase, Vercel and Xero**: what actually syncs and in which direction, prices by currency, regions, plan requirements and known limitations. Every fact links to the vendor page it came from and carries a last-verified date.
 
 The Lode MCP server gives AI assistants and coding agents those facts directly, so they can recommend, compare or provision an integration on evidence rather than memory.
 
