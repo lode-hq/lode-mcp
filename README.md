@@ -108,6 +108,8 @@ The first six only read. `check_stack_overlap` reads unless asked to share the s
 
 ## Agent skill: Lode Integration Check
 
+[![skills.sh](https://www.skills.sh/b/lode-hq/lode-mcp)](https://www.skills.sh/lode-hq/lode-mcp)
+
 A skill for Claude Code and other agents that support skills. It checks Lode before an agent recommends, compares or installs an integration, flags overlapping apps, and can recheck later whether a chosen integration's facts changed.
 
 Install with the skills CLI:
