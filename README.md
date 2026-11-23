@@ -1,6 +1,6 @@
 # Lode MCP server
 
-**Check before you install an integration.** [Lode](https://trylode.io) is an independent, source-linked database of facts about apps that integrate with **HubSpot, n8n, Netlify, QuickBooks Online, Shopify, Stripe, Supabase, Vercel and Xero**: what actually syncs and in which direction, prices by currency, regions, plan requirements and known limitations. Every fact links to the vendor page it came from and carries a last-verified date.
+**Check before you install an integration.** [Lode](https://trylode.io) is an independent, source-linked database of facts about apps that integrate with **HubSpot, Linear, Lovable, n8n, Netlify, QuickBooks Online, Replit, Shopify, Stripe, Supabase, Vercel and Xero**: what actually syncs and in which direction, prices by currency, regions, plan requirements and known limitations. Every fact links to the vendor page it came from and carries a last-verified date.
 
 The Lode MCP server gives AI assistants and coding agents those facts directly, so they can recommend, compare or provision an integration on evidence rather than memory.
 
@@ -109,6 +109,7 @@ The first six and `check_stack` only read. `check_stack` and `check_stack_overla
 - "What changed in HubSpot app pricing this month?"
 - "We have A2X, Synder and Amaka on Xero. Could they post the same invoices twice?"
 - "Which Shopify apps send orders and payouts to Xero?"
+- "Can a Lovable app manage HubSpot contacts through its connector, and is it the same on Replit?"
 
 ## How to read the answers
 

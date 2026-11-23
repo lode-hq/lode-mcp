@@ -1,7 +1,7 @@
 {
   "name": "lode",
   "version": "0.10.2",
-  "description": "Source-linked facts on apps that integrate with Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify and n8n: what syncs and which way, prices, plans, regions, limits.",
+  "description": "Source-linked facts on apps that integrate with Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n, Lovable, Replit and Linear: what syncs and which way, prices, plans, regions, limits.",
   "mcpServers": {
     "lode": {
       "httpUrl": "https://trylode.io/mcp"
