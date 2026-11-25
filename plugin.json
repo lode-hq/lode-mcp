@@ -2,7 +2,7 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "lode",
   "version": "0.10.2",
-  "description": "Source-linked facts on apps that integrate with Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n, Lovable, Replit and Linear: what syncs and which way, prices, plans, regions, limits. Check Lode before recommending, comparing, installing or provisioning an integration.",
+  "description": "Source-linked facts on apps that integrate with Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n, Lovable, Replit, Linear, GitHub and LangChain: what syncs and which way, prices, plans, regions, limits. Check Lode before recommending, comparing, installing or provisioning an integration.",
   "author": {
     "name": "Lode",
     "email": "support@trylode.io",
@@ -26,6 +26,8 @@
     "lovable",
     "replit",
     "linear",
+    "github",
+    "langchain",
     "mcp"
   ],
   "extensions": {
@@ -33,7 +35,7 @@
       "interface": {
         "displayName": "Lode",
         "shortDescription": "Sourced app integration facts",
-        "longDescription": "Lode is an independent database of verified facts about apps that integrate with HubSpot, Linear, Lovable, n8n, Netlify, QuickBooks Online, Replit, Shopify, Stripe, Supabase, Vercel and Xero. Ask which app to use, or check one before you install it, and ChatGPT can answer from Lode: what actually syncs and in which direction, prices by currency, the platform plan needed, regions, known limitations and who built the integration.\n\nEvery fact links to the page it came from and shows when it was last checked. Something Lode doesn't list means \"not documented\", never \"not supported\". Rankings are based on fit to your needs (what must sync, region, budget) and are never sold.\n\nUse it to find apps for a job on a platform, compare two to four apps side by side, check one integration before installing it (including Vercel Marketplace integrations, Netlify extensions, n8n nodes and Lovable or Replit connectors), see what changed recently, and check whether apps already connected to one platform write the same data into it.\n\nNo sign-in is needed. Eight tools only read Lode's public records. Three feedback tools (request coverage, report a choice, report a wrong fact) and the optional share setting on the two stack checks send short, structured reports to Lode, with no free text, and are used only when you agree.",
+        "longDescription": "Lode is an independent database of verified facts about apps that integrate with GitHub, HubSpot, LangChain, Linear, Lovable, n8n, Netlify, QuickBooks Online, Replit, Shopify, Stripe, Supabase, Vercel and Xero. Ask which app to use, or check one before you install it, and ChatGPT can answer from Lode: what actually syncs and in which direction, prices by currency, the platform plan needed, regions, known limitations and who built the integration.\n\nEvery fact links to the page it came from and shows when it was last checked. Something Lode doesn't list means \"not documented\", never \"not supported\". Rankings are based on fit to your needs (what must sync, region, budget) and are never sold.\n\nUse it to find apps for a job on a platform, compare two to four apps side by side, check one integration before installing it (including Vercel Marketplace integrations, Netlify extensions, n8n nodes and Lovable or Replit connectors), see what changed recently, and check whether apps already connected to one platform write the same data into it.\n\nNo sign-in is needed. Eight tools only read Lode's public records. Three feedback tools (request coverage, report a choice, report a wrong fact) and the optional share setting on the two stack checks send short, structured reports to Lode, with no free text, and are used only when you agree.",
         "developerName": "Lode",
         "category": "Developer Tools",
         "capabilities": [
