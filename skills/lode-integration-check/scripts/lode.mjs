@@ -133,6 +133,10 @@ async function get(path) {
 
 const DIR = { 'app-to-ecosystem': 'app → platform', 'ecosystem-to-app': 'platform → app', 'two-way': 'both ways', supported: 'supported; direction not documented', 'not-supported': 'documented as not supported' };
 const money = (prices = {}) => Object.entries(prices).map(([c, v]) => `${c} ${v}`).join(' / ');
+// A plan whose every price is 0 (and has no usage rate) is free: say so in words, never "USD 0" (Paul, 26-11-2026, LOD-152)
+const isFreePlan = (pl) => !pl.rate && Object.keys(pl.prices || {}).length > 0 && Object.values(pl.prices).every((v) => v === 0);
+const freePlan = (name = '') => (/free/i.test(name) ? (/plan/i.test(name) ? name : `${name} plan`) : `${name}: free`);
+const planText = (pl) => (isFreePlan(pl) ? freePlan(pl.name) : `${pl.name}${pl.billing ? ` (${pl.billing})` : ''}: ${money(pl.prices) || pl.rate || 'no published amount'}`);
 
 // One record as compact markdown. Facts are Lode's own sentences; every line keeps its sources.
 export function formatRecord(r) {
@@ -158,7 +162,7 @@ export function formatRecord(r) {
   const p = r.pricing || {};
   if (p.model || p.plans?.length) {
     out.push('', `Pricing (${p.model || 'model not stated'}):`);
-    for (const pl of p.plans || []) out.push(`- ${pl.name}${pl.billing ? ` (${pl.billing})` : ''}: ${money(pl.prices) || pl.rate || 'no published amount'}${pl.per ? `, ${pl.per}` : ''} [${cite(pl.src).join(' ')}]`);
+    for (const pl of p.plans || []) out.push(`- ${planText(pl)}${pl.per ? `, ${pl.per}` : ''} [${cite(pl.src).join(' ')}]`);
   }
   const req = r.requirements || {};
   out.push('', `Platform plan needed: ${req.ecosystem_plan_min && req.ecosystem_plan_min !== 'unknown' ? req.ecosystem_plan_min : 'not documented'}`);
@@ -341,7 +345,7 @@ export function factsOf(r) {
 export const factsHash = (r) => createHash('sha256').update(stable(factsOf(r))).digest('hex').slice(0, 12);
 export function priceLine(r) {
   const p = r.pricing || {};
-  const plans = (p.plans || []).map((pl) => `${pl.name}${pl.billing ? ` (${pl.billing})` : ''}: ${money(pl.prices) || pl.rate || 'no published amount'}`);
+  const plans = (p.plans || []).map(planText);
   const line = plans.length ? plans.join('; ') : p.model ? `pricing model: ${p.model}` : 'not documented';
   return line.length > 300 ? `${line.slice(0, 297)}...` : line;
 }
