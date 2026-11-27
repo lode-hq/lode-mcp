@@ -27,7 +27,7 @@ Save the file. Cline connects straight away; Lode should show as connected with 
 
 ## Check it works
 
-Ask: "Use Lode to list the platforms it covers." Cline should call `list_ecosystems` and return GitHub, HubSpot, LangChain, Linear, Lovable, n8n, Netlify, QuickBooks Online, Replit, Shopify, Stripe, Supabase, Vercel and Xero.
+Ask: "Use Lode to list the platforms it covers." Cline should call `list_ecosystems` and return Cloudflare, Cursor, GitHub, HubSpot, LangChain, Linear, Lovable, n8n, Netlify, QuickBooks Online, Replit, Shopify, Stripe, Supabase, Vercel and Xero.
 
 ## Notes for the agent
 
