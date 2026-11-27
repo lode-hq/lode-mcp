@@ -1,6 +1,6 @@
 ---
 name: lode-integration-check
-description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n, Lovable, Replit, Linear, GitHub, LangChain, Cursor or Cloudflare, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?"), reads a project''s package.json, requirements or config files to report what Lode documents about its stack (plan needed, overlaps, function run-time limits), and writes an integration decision record (ADR) when the user picks an integration.'
+description: 'Verified, source-linked facts about how two software products work together, from Lode (trylode.io). Use before recommending, comparing, connecting or installing an app or integration on Xero, QuickBooks Online, HubSpot, Shopify, Stripe, Supabase, Vercel, Netlify, n8n, Lovable, Replit, Linear, GitHub, LangChain, Cursor or Cloudflare, for example "connect Shopify to Xero", "which Xero app syncs purchase orders", "add auth to my Supabase project", "use Clerk with Supabase", "vercel integration add" or "sync Stripe payouts to QuickBooks", or adding a database, Postgres, Redis, auth, email or other service to a Vercel, Netlify or Supabase project through its marketplace. Answers what syncs and in which direction, price, the platform plan needed, regions, known limitations and who built the integration, each with its source and date. Also checks whether apps already connected to one platform write the same data into it ("A2X and Synder on Xero: do they overlap?"), reads a project''s package.json, requirements or config files to report what Lode documents about its stack (plan needed, overlaps, function run-time limits), writes an integration decision record (ADR) when the user picks an integration, and explains from sourced facts why an integration fails (auth, plan, rate or run-time limits, webhooks, outages).'
 ---
 
 # Lode Integration Check
@@ -31,6 +31,9 @@ sold. Use it so the user gets facts, not guesses, before an integration is chose
   integrations need, or how long its functions may run on Vercel, Netlify or Supabase. Use `stack`.
 - The user has just chosen an integration and wants it written down, or asks for a decision record or
   ADR. Use `adr`.
+- An integration between an app and one of those platforms fails (an auth error, a 429, a timeout, events
+  that never arrive, data that won't sync). Use `triage` with the one symptom code that fits.
+- The user wants Lode available to the whole team or to sub-agents in this project. Use `init`.
 
 Not for: library or API documentation (use the vendor's docs), package security checks, or platforms
 Lode does not cover.
@@ -189,7 +192,41 @@ found and the framework. Only add `--share` on a yes.
 
 If the Lode MCP server is connected (`https://trylode.io/mcp`), its tools do the same:
 `find_integrations`, `get_integration`, `compare_integrations`, `report_choice`, `request_coverage`,
-`check_stack_overlap` and `check_stack` (their `share` is the same as `--share`).
+`check_stack_overlap`, `check_stack` and `triage_integration` (their `share` is the same as `--share`).
+
+## When an integration fails
+
+```bash
+node scripts/lode.mjs triage <app> <platform> --symptom <code> [--status 429] [--object payouts]
+```
+
+Pick the one code that fits what you see: `credential-invalid`, `token-expired`, `scope-missing`,
+`authorize-failed`, `access-filtered`, `platform-plan-required`, `app-plan-required`, `account-restricted`,
+`rate-limited`, `request-too-large`, `runtime-limit-exceeded`, `config-missing`, `package-not-found`,
+`package-incompatible`, `capability-missing` (add `--object`), `validation-rejected`, `data-mismatch`,
+`webhook-not-received`, `webhook-signature-failed`, `event-duplicate-or-out-of-order`, `api-deprecated`,
+`region-unavailable`, `connection-failed`, `setup-step-missing`, `service-outage`, `mcp-connect-failed`,
+`mcp-tool-error`, or `other`. Lode answers with the sourced facts that explain that kind of failure for that
+pair: documented limitations, plan requirements, run-time limits, platform rules, regions, setup steps and
+recent status-page incidents, and, for `capability-missing`, the apps on that platform that document the
+object. Never send error messages, logs, code or project details: only the codes. If Lode has no matching
+fact, say so; the cause may be in the project's own setup.
+
+After trying a fix, ask the user whether Lode may keep, anonymously, what happened (`--outcome fixed`,
+`switched` with `--switched-to <app>`, or `gave-up`). Only on a yes add `--share`.
+
+## Add Lode to a project
+
+```bash
+node scripts/lode.mjs init [--client claude|cursor|all]
+```
+
+It shows the files it would change: one `lode` entry in `.mcp.json` (Claude Code) and/or
+`.cursor/mcp.json` (Cursor), and a copy of this skill in `.claude/skills/`. It writes nothing until the
+user agrees and you run it again with `--yes`. It runs only in a project folder, never through links, leaves
+any config file it can't parse alone (it tells you the entry to add by hand), changes no other entry, adds no
+code or hooks, and sends nothing to Lode. Committed, the files give every teammate and sub-agent in the project Lode with no
+setup. `init --remove --yes` undoes only what `init` added (noted in `.claude/lode-init.json`).
 
 ## Rules for the answer
 
@@ -219,6 +256,8 @@ Only with `--share` do `recheck` and `drop` send the project code, Lode ids, sta
 days since chosen. `adr` and `stack` work locally and read only Lode's public files; only with
 `--share` does `adr` send the project code, platform, Lode ids and a count of other options, and the fixed
 reason, status, constraint and workaround codes with the days since the decision, and `stack` the app
-and platform codes it found and the framework. Nothing else from the user's project, prompt or machine
+and platform codes it found and the framework. `triage` sends the app, the platform, the symptom code and the
+HTTP status if given (Lode keeps only its class), and the outcome only with `--share`. `init` sends nothing.
+Nothing else from the user's project, prompt or machine
 is sent, and no free text. Privacy:
 https://trylode.io/privacy/
