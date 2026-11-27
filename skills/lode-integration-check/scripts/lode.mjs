@@ -21,6 +21,10 @@
 //   node lode.mjs adr --update <file> [--status <s>] [--constraint a,b] [--workaround a,b] [--share]
 //                                             write or update a decision record in docs/adr/ in the current folder
 //   node lode.mjs stack [--framework f] [--share]   what Lode documents about the apps and platforms this project's manifests name
+//   node lode.mjs triage <app> <platform> --symptom <code> [--status 429] [--object o] [--outcome fixed|switched|gave-up] [--switched-to <app>] [--share]
+//                                             why an integration fails: Lode's sourced facts for that kind of failure
+//   node lode.mjs init [--client claude|cursor|all] [--yes] [--remove]
+//                                             add Lode to this project so every teammate and sub-agent has it (shows the files first)
 //
 // What Lode receives: the app, platform and options in each request (for find and request: the needs,
 // region, stack names and fixed codes you pass). chose and outcome send nothing unless --share is
@@ -37,7 +41,10 @@
 // the fixed reason, status, constraint and workaround codes, and the days since the decision. stack reads
 // only package.json, requirements.txt, pyproject.toml, Gemfile, go.mod, the variable NAMES in .env.example
 // (never values), vercel.json, netlify.toml and supabase/config.toml, then Lode's public files; only with
-// --share does it send the app and platform codes it found and the framework.
+// --share does it send the app and platform codes it found and the framework. triage sends the app, the platform,
+// one fixed symptom code and the HTTP status if given (Lode keeps only its class); never error text, logs or code;
+// the outcome only with --share. init writes only Lode's server address into .mcp.json and/or .cursor/mcp.json and
+// copies this skill into .claude/skills/, after showing the files and only with --yes; it sends nothing to Lode.
 // Nothing else from your project, prompt or machine is sent; no free text. https://trylode.io/privacy/
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'node:fs';
@@ -823,6 +830,134 @@ async function stack({ share, framework } = {}) {
   return text;
 }
 
+
+// Integration Triage (LOD-165): fixed symptom codes, kept equal to SYMPTOM_CODES in src/lib/triage.mjs by tests/triage.test.mjs
+export const SYMPTOM_CODES = ["credential-invalid", "token-expired", "scope-missing", "authorize-failed", "access-filtered", "platform-plan-required", "app-plan-required", "account-restricted", "rate-limited", "request-too-large", "runtime-limit-exceeded", "config-missing", "package-not-found", "package-incompatible", "capability-missing", "validation-rejected", "data-mismatch", "webhook-not-received", "webhook-signature-failed", "event-duplicate-or-out-of-order", "api-deprecated", "region-unavailable", "connection-failed", "setup-step-missing", "service-outage", "mcp-connect-failed", "mcp-tool-error", "other"];
+export const TRIAGE_OUTCOMES = ['fixed', 'switched', 'gave-up'];
+
+async function triageCmd(app, platform, opts) {
+  const eco = platformSlug(platform);
+  if (!eco) return `Lode does not cover "${platform}" yet. Platforms covered: ${Object.keys(PLATFORMS).join(', ')}.`;
+  if (!SYMPTOM_CODES.includes(opts.symptom)) return `Give one symptom code with --symptom: ${SYMPTOM_CODES.join(', ')}`;
+  const q = new URLSearchParams({ app, platform: eco, symptom: opts.symptom });
+  if (typeof opts.status === 'string' && /^[1-5]\d\d$/.test(opts.status)) q.set('http_status', opts.status);
+  if (typeof opts.object === 'string') q.set('object', opts.object);
+  const share = opts.share === true && TRIAGE_OUTCOMES.includes(opts.outcome);
+  if (share) { q.set('outcome', opts.outcome); q.set('share', 'true'); if (typeof opts.switched === 'string') q.set('switched_to', opts.switched); }
+  const sent = `Sent to Lode: app "${app}", platform ${eco}, symptom ${opts.symptom}${q.get('http_status') ? `, status class ${q.get('http_status')[0]}xx` : ''}${share ? `, outcome ${opts.outcome} (the user agreed)` : ''}. No error text, logs or code.`;
+  const body = await get(`/v1/triage?${q}`);
+  if (!body || body.found === false) return `${sent}\n${body?.not_documented || `Lode has no record for "${app}" on ${eco}. Not documented is not the same as not supported.`}`;
+  const out = [`${body.app} on ${body.platform}: ${body.symptom} (${body.symptom_label})`, body.url ? `Lode page: ${body.url} | verified ${body.last_verified || 'unknown'}` : ''];
+  for (const f of body.facts || []) out.push(`- ${f.text}${(f.sources || []).length ? ` [${f.sources.join(' ')}]` : ''}`);
+  for (const i of body.incidents || []) out.push(`- Status page: ${i.name} (${i.status}, ${String(i.at).slice(0, 10)}) ${i.link}`);
+  if (body.incidents_note) out.push(body.incidents_note);
+  for (const a of body.alternatives || []) out.push(`- Also documents it on ${body.platform}: ${a.app} ${a.url || ''}`);
+  if (body.not_documented) out.push(body.not_documented);
+  out.push(sent);
+  if (opts.outcome && !share) out.push('The outcome was not sent. Only if the user agrees to share it anonymously, run this again with --share.');
+  return out.filter(Boolean).join('\n');
+}
+
+// lode init (Paul approved 27-11-2026): put Lode in the project's own config so teammates and sub-agents have it.
+// Runs only when someone types it, shows the exact files first, writes only with --yes, changes no other entry,
+// adds no code or hooks, sends nothing to Lode, and `init --remove` undoes it.
+const LODE_URL = 'https://trylode.io/mcp';
+async function initCmd({ client = 'all', yes = false, remove = false } = {}) {
+  const fs = await import('node:fs'); const path = await import('node:path'); const url = await import('node:url'); const os = await import('node:os'); const crypto = await import('node:crypto');
+  const cwd = fs.realpathSync(process.cwd());
+  // Only inside a project: never the home folder or the root, and only where a project marker exists (security review 27-11-2026)
+  if (cwd === path.parse(cwd).root || cwd === fs.realpathSync(os.homedir())) return 'lode init only runs inside a project folder, not your home folder or the root. Nothing was written.';
+  const MARKERS = ['.git', 'package.json', 'pyproject.toml', 'go.mod', 'Gemfile', 'requirements.txt', 'Cargo.toml', 'deno.json', 'composer.json'];
+  if (!MARKERS.some((m) => fs.existsSync(path.join(cwd, m)))) return `lode init didn't find a project here (none of ${MARKERS.join(', ')}). Run it from the project's root folder. Nothing was written.`;
+  // A target is safe only when it and every folder between it and the project are real (not symlinks)
+  const safe = (rel) => { let p = cwd; for (const part of rel.split(/[\\/]/)) { p = path.join(p, part); try { if (fs.lstatSync(p).isSymbolicLink()) return false; } catch { return true; } } return true; };
+  const hash = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+  const markerRel = path.join('.claude', 'lode-init.json');
+  const markerFile = path.join(cwd, markerRel);
+  if (!safe(markerRel)) return `${markerRel}: .claude or the file is a link, so lode init won't write there. Nothing was written.`;
+  let marker = { added: [], skill_files: {} };
+  try { marker = JSON.parse(fs.readFileSync(markerFile, 'utf8')); } catch { /* none yet */ }
+  const targets = [];
+  if (client === 'all' || client === 'claude') targets.push({ file: '.mcp.json', entry: { type: 'http', url: LODE_URL } });
+  if (client === 'all' || client === 'cursor') targets.push({ file: path.join('.cursor', 'mcp.json'), entry: { url: LODE_URL } });
+  const here = path.dirname(url.fileURLToPath(import.meta.url));
+  const skillSrc = path.resolve(here, '..');
+  const skillRel = path.join('.claude', 'skills', 'lode-integration-check');
+  const skillDst = path.join(cwd, skillRel);
+  const SKILL_FILES = ['SKILL.md', 'PERMISSIONS.md', path.join('scripts', 'lode.mjs')];
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const plan = [], refused = [];
+  for (const t of targets) {
+    const f = path.join(cwd, t.file);
+    if (!safe(t.file)) { refused.push(`${t.file}: it or a folder above it is a link, so lode init won't touch it.`); continue; }
+    let text = null, cur = {};
+    try { text = fs.readFileSync(f, 'utf8'); } catch (e) { if (e.code !== 'ENOENT') { refused.push(`${t.file}: can't be read (${e.code}).`); continue; } }
+    if (text != null) {
+      try { cur = JSON.parse(text); } catch { cur = undefined; }
+      if (!cur || typeof cur !== 'object' || Array.isArray(cur) || (cur.mcpServers != null && (typeof cur.mcpServers !== 'object' || Array.isArray(cur.mcpServers)))) {
+        refused.push(`${t.file}: not plain JSON that lode init can safely edit (comments, trailing commas or another shape). Add this entry by hand under "mcpServers": "lode": ${JSON.stringify(t.entry)}`); continue;
+      }
+    }
+    const indent = (text?.match(/\n([ \t]+)"/) || [])[1] || 2;
+    const has = cur.mcpServers && Object.prototype.hasOwnProperty.call(cur.mcpServers, 'lode');
+    const ours = (marker.added || []).find((a) => a.file === t.file);
+    if (remove) {
+      if (has && (same(cur.mcpServers.lode, t.entry) || (ours && same(cur.mcpServers.lode, ours.entry)))) plan.push({ do: 'remove', file: t.file, f, cur, indent, created: !!ours?.created });
+      else if (has) refused.push(`${t.file}: its "lode" entry isn't the one lode init adds, so it was left alone.`);
+    } else if (!has) plan.push({ do: 'add', file: t.file, f, cur, indent, entry: t.entry, created: text == null });
+  }
+  const skillThere = fs.existsSync(path.join(skillDst, 'SKILL.md'));
+  if (!safe(skillRel)) refused.push(`${skillRel}: it or a folder above it is a link, so lode init won't touch it.`);
+  else if (remove && Object.keys(marker.skill_files || {}).length) plan.push({ do: 'remove-skill', file: skillRel });
+  else if (!remove && !skillThere && path.resolve(skillSrc) !== path.resolve(skillDst)) plan.push({ do: 'copy-skill', file: skillRel });
+  const refusedText = refused.length ? `\nNot changed:\n${refused.map((r) => `  ${r}`).join('\n')}` : '';
+  if (!plan.length) return (remove ? 'Nothing to remove that lode init added.' : 'Lode is already set up in this project.') + refusedText;
+  const lines = plan.map((p) => p.do === 'add' ? `  ${p.file}: ${p.created ? 'create it with' : 'add'} one entry "lode" -> ${LODE_URL}${p.created ? '' : ' (other entries unchanged)'}`
+    : p.do === 'remove' ? `  ${p.file}: remove the "lode" entry lode init added (other entries unchanged)${p.created ? '; delete the file if nothing else is left in it' : ''}`
+    : p.do === 'copy-skill' ? `  ${p.file}/: copy the Lode Integration Check skill (SKILL.md, PERMISSIONS.md, scripts/lode.mjs; no dependencies, nothing runs on install)`
+    : `  ${p.file}/: delete the skill files lode init copied, if unchanged`);
+  if (!remove) lines.push(`  ${markerRel}: a small note of what lode init added, so --remove undoes only that`);
+  if (!yes) return `lode init would ${remove ? 'change' : 'write'} these files in ${cwd}:\n${lines.join('\n')}${refusedText}\nNothing has been written and nothing is sent to Lode. If the user agrees, run: node lode.mjs init${remove ? ' --remove' : ''}${client !== 'all' ? ` --client ${client}` : ''} --yes`;
+  const write = (p, next) => {
+    fs.writeFileSync(p.f, JSON.stringify(next, null, p.indent) + '\n');
+    // Check afterwards that every other entry is exactly as it was
+    const back = JSON.parse(fs.readFileSync(p.f, 'utf8'));
+    for (const k of Object.keys(p.cur)) if (k !== 'mcpServers' && !same(back[k], p.cur[k])) throw new Error(`${p.file} changed unexpectedly`);
+    for (const k of Object.keys(p.cur.mcpServers || {})) if (k !== 'lode' && !same(back.mcpServers?.[k], p.cur.mcpServers[k])) throw new Error(`${p.file} changed unexpectedly`);
+  };
+  for (const p of plan) {
+    if (p.do === 'add') {
+      fs.mkdirSync(path.dirname(p.f), { recursive: true });
+      write(p, { ...p.cur, mcpServers: { ...(p.cur.mcpServers || {}), lode: p.entry } });
+      marker.added = [...(marker.added || []).filter((a) => a.file !== p.file), { file: p.file, created: p.created, entry: p.entry }];
+    }
+    if (p.do === 'remove') {
+      const next = { ...p.cur, mcpServers: { ...p.cur.mcpServers } }; delete next.mcpServers.lode;
+      if (p.created && !Object.keys(next.mcpServers).length && Object.keys(next).length === 1) fs.rmSync(p.f); else write(p, next);
+      marker.added = (marker.added || []).filter((a) => a.file !== p.file);
+    }
+    if (p.do === 'copy-skill') {
+      marker.skill_files = {};
+      for (const rel of SKILL_FILES) {
+        const from = path.join(skillSrc, rel), to = path.join(skillDst, rel);
+        if (!fs.existsSync(from)) continue;
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+        marker.skill_files[rel] = hash(to);
+      }
+    }
+    if (p.do === 'remove-skill') {
+      // Delete only the files lode init copied and nobody has changed; keep the folder if anything else is in it
+      for (const [rel, h] of Object.entries(marker.skill_files || {})) { const f = path.join(skillDst, rel); try { if (hash(f) === h) fs.rmSync(f); } catch { /* already gone */ } }
+      for (const d of [path.join(skillDst, 'scripts'), skillDst]) { try { if (!fs.readdirSync(d).length) fs.rmdirSync(d); } catch { /* not empty or gone */ } }
+      marker.skill_files = {};
+    }
+  }
+  if ((marker.added || []).length || Object.keys(marker.skill_files || {}).length) { fs.mkdirSync(path.dirname(markerFile), { recursive: true }); fs.writeFileSync(markerFile, JSON.stringify(marker, null, 2) + '\n'); }
+  else { try { fs.rmSync(markerFile); } catch { /* none */ } }
+  return `${remove ? 'Removed' : 'Done'}:\n${lines.join('\n')}${refusedText}\n${remove ? '' : 'Commit these files so teammates and sub-agents in this project have Lode. Undo with: node lode.mjs init --remove --yes\n'}Nothing was sent to Lode.`;
+}
+
 async function main(argv) {
   const [cmd, ...rest] = argv;
   const flag = (n) => { const i = rest.indexOf(n); if (i < 0) return undefined; const v = rest[i + 1]; rest.splice(i, v && !v.startsWith('--') ? 2 : 1); return v && !v.startsWith('--') ? v : true; };
@@ -908,8 +1043,17 @@ async function main(argv) {
     const opts = { framework: flag('--framework'), share: flag('--share') };
     return stack({ framework: opts.framework, share: opts.share === true });
   }
+  if (cmd === 'triage' && rest[1]) {
+    const opts = { symptom: flag('--symptom'), status: flag('--status'), object: flag('--object'), outcome: flag('--outcome'), switched: flag('--switched-to'), share: flag('--share') };
+    return triageCmd(rest[0], rest[1], opts);
+  }
+  if (cmd === 'init') {
+    const opts = { client: flag('--client'), yes: flag('--yes'), remove: flag('--remove') };
+    const client = ['claude', 'cursor', 'all'].includes(opts.client) ? opts.client : 'all';
+    return initCmd({ client, yes: opts.yes === true, remove: opts.remove === true });
+  }
   if (cmd === 'platforms') return `Lode covers: ${Object.keys(PLATFORMS).join(', ')}. Facts are source-linked and dated; see https://trylode.io/methodology/`;
-  return 'Usage:\n  node lode.mjs check <app> [platform]\n  node lode.mjs find <platform> [--category c] [--needs a,b] [--region XX] [--stack a,b] [--framework f]\n  node lode.mjs list <platform> [--category <c>] [--all]\n  node lode.mjs chose <app|none> <platform> [--considered "A,B"] [--reason code] [--share]\n  node lode.mjs outcome <app> <platform> <integrated|failed|abandoned|not-tried> [--failure-reason code] [--share]\n  node lode.mjs request <app> <platform> [--needs a,b] [--region XX]\n  node lode.mjs overlap <platform> --apps "A,B,C" [--region XX] [--share]\n  node lode.mjs recheck [--share]\n  node lode.mjs drop <app> <platform> [--reason code] [--switched-to <app>] [--share]\n  node lode.mjs adr <platform> --considered "A,B" --chose B [--reason code] [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs adr --update <file> [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs stack [--framework f] [--share]\n  node lode.mjs platforms';
+  return 'Usage:\n  node lode.mjs check <app> [platform]\n  node lode.mjs triage <app> <platform> --symptom <code> [--status 429] [--object o]\n  node lode.mjs init [--client claude|cursor|all] [--yes] [--remove]\n  node lode.mjs find <platform> [--category c] [--needs a,b] [--region XX] [--stack a,b] [--framework f]\n  node lode.mjs list <platform> [--category <c>] [--all]\n  node lode.mjs chose <app|none> <platform> [--considered "A,B"] [--reason code] [--share]\n  node lode.mjs outcome <app> <platform> <integrated|failed|abandoned|not-tried> [--failure-reason code] [--share]\n  node lode.mjs request <app> <platform> [--needs a,b] [--region XX]\n  node lode.mjs overlap <platform> --apps "A,B,C" [--region XX] [--share]\n  node lode.mjs recheck [--share]\n  node lode.mjs drop <app> <platform> [--reason code] [--switched-to <app>] [--share]\n  node lode.mjs adr <platform> --considered "A,B" --chose B [--reason code] [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs adr --update <file> [--status s] [--constraint a,b] [--workaround a,b] [--share]\n  node lode.mjs stack [--framework f] [--share]\n  node lode.mjs platforms';
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('lode.mjs')) {

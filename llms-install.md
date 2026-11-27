@@ -23,7 +23,7 @@ Add this entry to `cline_mcp_settings.json` (Cline > MCP Servers > Configure MCP
 }
 ```
 
-Save the file. Cline connects straight away; Lode should show as connected with 11 tools.
+Save the file. Cline connects straight away; Lode should show as connected with 13 tools.
 
 ## Check it works
 

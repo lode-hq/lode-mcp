@@ -97,11 +97,13 @@ gemini extensions install https://github.com/lode-hq/lode-mcp
 | `get_changes` | What changed recently: prices, plans and capabilities, with old and new values |
 | `check_stack` | For the apps and platforms a project uses (from `package.json` or config files): the Lode records for them, the platform plans they need, objects more than one app writes, and each platform's function run-time limits |
 | `check_stack_overlap` | Which apps already connected to one platform write the same data into it (possible duplicates), with sources |
+| `triage_integration` | Why an integration fails: give the app, the platform and a symptom code (rate limited, token expired, webhook not received and others), and get Lode's sourced facts for that kind of failure |
+| `claim_vendor` | For a vendor's own staff: claim the company's Lode pages with a work email or a `lode.json` file on its domain |
 | `request_coverage` | Tell Lode about an integration it doesn't cover yet |
 | `report_choice` | Tell Lode which app was chosen and why (only if the user agrees) |
 | `report_error` | Report a fact that looks wrong |
 
-The first six and `check_stack` only read. `check_stack` and `check_stack_overlap` keep the stack only if asked to share it. The three feedback tools send structured, anonymous values only, and only when the user agrees. See [privacy](https://trylode.io/privacy/).
+The first six and `check_stack` only read. `triage_integration` keeps only the app, the platform and the symptom code, never error messages or code; what happened next only if the user chooses to share it. `check_stack` and `check_stack_overlap` keep the stack only if asked to share it. The three feedback tools send structured, anonymous values only, and only when the user agrees. See [privacy](https://trylode.io/privacy/).
 
 ## Example prompts
 
